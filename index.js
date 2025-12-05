@@ -5,7 +5,7 @@ const app = express();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
-const port = process.env.PORT || 5000;
+const port = process.env.PORT || 3000;
 
 // DB_USER=zap_shift_user
 // DB_PASS=1rG2tDUjGpcUcItS
