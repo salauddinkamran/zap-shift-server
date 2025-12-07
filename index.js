@@ -5,7 +5,14 @@ const app = express();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
-const port = process.env.PORT || 5000;
+const port = process.env.PORT || 3000;
+crypto = require("crypto");
+function generateTrackingId() {
+  const prefix = "ZAP"; // your courier/company code
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, ""); // YYYYMMDD
+  const random = Math.random().toString(36).substring(2, 8).toUpperCase();
+  return `${prefix}-${date}-${random}`;
+}
 
 // DB_USER=zap_shift_user
 // DB_PASS=1rG2tDUjGpcUcItS
@@ -29,6 +36,7 @@ async function run() {
     await client.connect();
     const db = client.db("zap_shift_db");
     const parcelsCollection = db.collection("parcels");
+    const paymentCollection = db.collection("payments");
 
     // parcel api
     app.get("/parcels", async (req, res) => {
@@ -67,6 +75,37 @@ async function run() {
     });
 
     // payment releted apis
+
+    // New payment get way system
+    app.post("/payment-checkout-session", async (req, res) => {
+      const paymentInfo = req.body;
+      const amount = parseInt(paymentInfo.cost) * 100;
+      const session = await stripe.checkout.sessions.create({
+        line_items: [
+          {
+            // # Provide the exact Price ID (for example, price_1234) of the product you want to sell
+            price_data: {
+              currency: "usd",
+              unit_amount: amount,
+              product_data: {
+                name: `please pay for ${paymentInfo.parcelName}`,
+              },
+            },
+            quantity: 1,
+          },
+        ],
+        mode: "payment",
+        metadata: {
+          parcelId: paymentInfo.parcelId,
+        },
+        customer_email: paymentInfo.senderEmail,
+        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+      });
+      res.send({ url: session.url });
+    });
+
+    // Old payment get way system
     app.post("/create-checkout-session", async (req, res) => {
       const paymentInfo = req.body;
       const amount = parseInt(paymentInfo.cost) * 100;
@@ -87,6 +126,7 @@ async function run() {
         mode: "payment",
         metadata: {
           parcelId: paymentInfo.parcelId,
+          parcelName: paymentInfo.parcelName,
         },
         success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success`,
         cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
@@ -95,6 +135,49 @@ async function run() {
       // res.redirect(303, session.url);
       console.log(session);
       res.send({ url: session.url });
+    });
+    app.patch("/payment-success", async (req, res) => {
+      const sessionId = req.query.session_id;
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      // console.log("session id", sessionId)
+      console.log("session relative", session);
+      const trackingId = generateTrackingId();
+      if (session.payment_status === "paid") {
+        const id = session.metadata.parcelId;
+        const query = { _id: new ObjectId(id) };
+        const update = {
+          $set: {
+            paymentStatus: "paid",
+            trackingId: trackingId,
+          },
+        };
+        const result = await parcelsCollection.updateOne(query, update);
+
+        const payment = {
+          amount: session.amount_total / 100,
+          currency: session.currency,
+          customerEmail: session.customer_email,
+          parcelId: session.metadata.parcelId,
+          parcelName: session.metadata.parcelName,
+          transactionId: session.payment_intent,
+          paymentStatus: session.payment_status,
+          paidAt: new Date(),
+        };
+
+        if (session.payment_status === "paid") {
+          const resultPayment = await paymentCollection.insertOne(payment);
+          res.send({
+            success: true,
+            modifyParcel: result,
+            trackingId: trackingId,
+            transactionId: session.payment_intent,
+            paymentInfo: resultPayment,
+          });
+        }
+
+        // res.send(result);
+        res.send({ success: false });
+      }
     });
 
     // Send a ping to confirm a successful connection
