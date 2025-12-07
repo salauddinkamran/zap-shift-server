@@ -6,6 +6,7 @@ const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
 const port = process.env.PORT || 3000;
+
 crypto = require("crypto");
 function generateTrackingId() {
   const prefix = "ZAP"; // your courier/company code
@@ -13,6 +14,7 @@ function generateTrackingId() {
   const random = Math.random().toString(36).substring(2, 8).toUpperCase();
   return `${prefix}-${date}-${random}`;
 }
+
 
 // DB_USER=zap_shift_user
 // DB_PASS=1rG2tDUjGpcUcItS
